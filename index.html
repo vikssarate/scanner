@@ -209,7 +209,7 @@ video{width:100%;border-radius:12px;background:#000;display:block}
       res();
     }));
   }
-    function clamp(r){
+  function clamp(r){
     r.w = Math.max(24, Math.min(r.w, stageBox.width));
     r.h = Math.max(24, Math.min(r.h, stageBox.height));
     r.x = Math.max(0, Math.min(r.x, stageBox.width - r.w));
@@ -395,4 +395,7 @@ video{width:100%;border-radius:12px;background:#000;display:block}
 
   // Init UI
   uiCamera(false); uiExports();
-})();   
+})();
+</script>
+</body>
+</html>
