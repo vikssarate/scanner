@@ -14,8 +14,7 @@ h1{font-size:18px;margin:0}
 .wrap{max-width:1100px;margin:0 auto;padding:12px}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
-.btn{appearance:none;border:1px solid var(--line);background:#12162a;color:var(--ink);
-     padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+.btn{appearance:none;border:1px solid var(--line);background:#12162a;color:var(--ink);padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .primary{background:var(--accent);border-color:transparent;color:#07152a}
 .ok{background:var(--ok);border-color:transparent;color:#06210f}
@@ -26,18 +25,15 @@ hr{border:none;border-top:1px solid var(--line);margin:12px 0}
 
 #camWrap{position:relative}
 video{width:100%;border-radius:12px;background:#000;display:block}
-/* Tap-anywhere capture overlay — must be transparent on iPad Safari */
+
+/* Tap-anywhere overlay — transparent on iPad Safari */
 #tapToShoot{
   position:absolute; inset:0; border-radius:12px;
-  background: transparent !important;   /* ← kill white fill */
-  color: transparent;                    /* no text flash */
-  border: 0;                             /* reset default iOS button border */
-  outline: none;
-  -webkit-appearance: none; appearance: none;  /* remove native UIButton look */
-  padding: 0;
+  background:transparent !important; color:transparent; border:0; outline:none;
+  -webkit-appearance:none; appearance:none; padding:0; cursor:pointer;
 }
-/* only show a subtle dashed frame when we want to hint “tap to capture” */
 #tapToShoot.hint{ border:2px dashed rgba(255,255,255,.25); }
+
 #stage{position:relative;display:none;margin-top:8px}
 #stage.ready{display:block}
 #stage img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none;border-radius:12px}
@@ -65,7 +61,6 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   <h1>Scan & Merge</h1>
   <div class="row">
     <button id="startBtn" class="btn primary">Start camera</button>
-    <button id="tapToShoot" aria-label="Tap to capture"></button>
     <button id="switchBtn" class="btn" disabled>Switch camera</button>
     <button id="clearBtn" class="btn bad" disabled>Clear all</button>
   </div>
@@ -78,7 +73,7 @@ video{width:100%;border-radius:12px;background:#000;display:block}
     <div id="camWrap">
       <video id="video" playsinline muted></video>
       <!-- Tap anywhere overlay to capture -->
-      <button id="tapToShoot" aria-label="Tap to capture"></button>
+      <div id="tapToShoot" role="button" aria-label="Tap to capture" tabindex="0"></div>
     </div>
 
     <!-- Crop stage -->
@@ -118,7 +113,6 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   const video = document.getElementById('video');
   const tapToShoot = document.getElementById('tapToShoot');
   const startBtn = document.getElementById('startBtn');
-  const captureBtn = document.getElementById('captureBtn');
   const switchBtn = document.getElementById('switchBtn');
   const clearBtn = document.getElementById('clearBtn');
   const exportJPG = document.getElementById('exportJPG');
@@ -138,7 +132,6 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   let pages = [];
 
   function uiCamera(on) {
-    captureBtn.disabled = !on;
     switchBtn.disabled = !on;
     tapToShoot.classList.toggle('hint', on);
   }
@@ -204,49 +197,47 @@ video{width:100%;border-radius:12px;background:#000;display:block}
     return new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
   }
 
-  // --- Crop state (in CSS px relative to displayed image) ---
+  // --- Crop state ---
   let dragging = null; // 'move' or 'nw' | 'ne' | 'sw' | 'se'
   let rect = {x:0,y:0,w:100,h:100};
   let start = null;
   let stageBox = null;
 
   function measureStage() {
-    // Wait one frame to ensure layout is final on iPad Safari
     return new Promise(res => requestAnimationFrame(() => {
       stageBox = imgEl.getBoundingClientRect();
       res();
     }));
   }
-  function clamp(r){
+    function clamp(r){
     r.w = Math.max(24, Math.min(r.w, stageBox.width));
     r.h = Math.max(24, Math.min(r.h, stageBox.height));
     r.x = Math.max(0, Math.min(r.x, stageBox.width - r.w));
     r.y = Math.max(0, Math.min(r.y, stageBox.height - r.h));
   }
   function paintCrop(){
-    cropBox.style.left = rect.x+'px';
-    cropBox.style.top  = rect.y+'px';
-    cropBox.style.width= rect.w+'px';
-    cropBox.style.height=rect.h+'px';
+    cropBox.style.left = rect.x + 'px';
+    cropBox.style.top  = rect.y + 'px';
+    cropBox.style.width  = rect.w + 'px';
+    cropBox.style.height = rect.h + 'px';
   }
   function showCropFromBlob(blob){
     const url = URL.createObjectURL(blob);
     imgEl.onload = async () => {
       stage.style.display = 'block';
       await measureStage();
-      // 80% centered box
-      rect.w = Math.round(stageBox.width*0.8);
-      rect.h = Math.round(stageBox.height*0.8);
-      rect.x = Math.round((stageBox.width-rect.w)/2);
-      rect.y = Math.round((stageBox.height-rect.h)/2);
+      // 80% centered crop
+      rect.w = Math.round(stageBox.width * 0.8);
+      rect.h = Math.round(stageBox.height * 0.8);
+      rect.x = Math.round((stageBox.width - rect.w) / 2);
+      rect.y = Math.round((stageBox.height - rect.h) / 2);
       paintCrop();
       stage.classList.add('ready');
       video.style.display = 'none';
       tapToShoot.style.display = 'none';
     };
     imgEl.src = url;
-    // Revoke later (after load) — safe for iOS
-    imgEl.addEventListener('load', () => URL.revokeObjectURL(url), {once:true});
+    imgEl.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
   }
   function hideCrop(){
     stage.classList.remove('ready');
@@ -255,26 +246,30 @@ video{width:100%;border-radius:12px;background:#000;display:block}
     tapToShoot.style.display = 'block';
   }
   function cssRectToImageRect(){
-    const sx = Math.round(rect.x * (imgEl.naturalWidth / stageBox.width));
-    const sy = Math.round(rect.y * (imgEl.naturalHeight / stageBox.height));
-    const sw = Math.round(rect.w * (imgEl.naturalWidth / stageBox.width));
-    const sh = Math.round(rect.h * (imgEl.naturalHeight / stageBox.height));
-    return {sx,sy,sw,sh};
+    const scaleX = imgEl.naturalWidth  / stageBox.width;
+    const scaleY = imgEl.naturalHeight / stageBox.height;
+    return {
+      sx: Math.round(rect.x * scaleX),
+      sy: Math.round(rect.y * scaleY),
+      sw: Math.round(rect.w * scaleX),
+      sh: Math.round(rect.h * scaleY)
+    };
   }
 
-  // Move/resize crop (pointer events work well on iPad)
-  cropBox.addEventListener('pointerdown', (e)=>{
+  // ----- Crop interactions -----
+  cropBox.addEventListener('pointerdown', (e) => {
     const dir = e.target.dataset.dir;
     dragging = dir || 'move';
-    start = {x:e.clientX, y:e.clientY, rect:{...rect}};
+    start = { x: e.clientX, y: e.clientY, rect: { ...rect } };
     cropBox.setPointerCapture(e.pointerId);
-  }, {passive:false});
-  cropBox.addEventListener('pointermove', (e)=>{
+  }, { passive:false });
+
+  cropBox.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
-    let r = {...start.rect};
-    if (dragging === 'move'){ r.x += dx; r.y += dy; }
+    let r = { ...start.rect };
+    if (dragging === 'move') { r.x += dx; r.y += dy; }
     else {
       if (dragging.includes('w')) { r.x += dx; r.w -= dx; }
       if (dragging.includes('e')) { r.w += dx; }
@@ -282,29 +277,33 @@ video{width:100%;border-radius:12px;background:#000;display:block}
       if (dragging.includes('s')) { r.h += dy; }
     }
     clamp(r); rect = r; paintCrop();
-  }, {passive:false});
-  cropBox.addEventListener('pointerup', ()=> dragging=null);
-  cropBox.addEventListener('lostpointercapture', ()=> dragging=null);
+  }, { passive:false });
 
-  // --- Gallery ---
+  cropBox.addEventListener('pointerup', () => dragging = null);
+  cropBox.addEventListener('lostpointercapture', () => dragging = null);
+
+  // ----- Gallery -----
   function renderGallery(){
     gallery.innerHTML = '';
-    pages.forEach((p,i)=>{
-      const d = document.createElement('div'); d.className='thumb';
+    pages.forEach((p, i) => {
+      const d = document.createElement('div'); d.className = 'thumb';
       const im = document.createElement('img'); im.src = p.url; im.alt = `Page ${i+1}`;
-      const del = document.createElement('button'); del.className='btn bad small'; del.textContent='×';
+      const del = document.createElement('button'); del.className = 'btn bad small'; del.textContent = '×';
       del.onclick = () => { URL.revokeObjectURL(p.url); pages.splice(i,1); renderGallery(); uiExports(); };
-      const label = document.createElement('div'); label.className='small'; label.style.padding='6px'; label.textContent=`Page ${i+1}`;
+      const label = document.createElement('div'); label.className='small'; label.style.padding='6px'; label.textContent = `Page ${i+1}`;
       d.append(im, del, label);
       gallery.appendChild(d);
     });
   }
 
-  // --- Buttons ---
+  // ----- Controls -----
   startBtn.onclick   = () => startCamera(true);
   switchBtn.onclick  = () => startCamera(!usingRear);
-  captureBtn.onclick = onTapCapture;
+
   tapToShoot.onclick = onTapCapture;
+  tapToShoot.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'Enter') onTapCapture();
+  });
 
   async function onTapCapture(){
     if (!stream || stage.classList.contains('ready')) return;
@@ -316,16 +315,13 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   retakeBtn.onclick = () => hideCrop();
 
   useCropBtn.onclick = async () => {
-    // Crop the displayed image using natural pixels
     const {sx, sy, sw, sh} = cssRectToImageRect();
-    // Draw from the temporary displayed image
     const c = document.createElement('canvas'); c.width = sw; c.height = sh;
     const ctx = c.getContext('2d');
-    // Ensure the source image is ready
     ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
     const blob = await canvasToBlob(c, 'image/jpeg', 0.95);
     const url  = URL.createObjectURL(blob);
-    pages.push({blob, url, w: sw, h: sh});
+    pages.push({ blob, url, w: sw, h: sh });
     renderGallery(); uiExports();
     hideCrop();
   };
@@ -338,19 +334,18 @@ video{width:100%;border-radius:12px;background:#000;display:block}
     }
   };
 
-  // --- Exporters ---
+  // ----- Exporters -----
   exportJPG.onclick = async () => {
     if (!pages.length) return;
-    // Use max width; scale others to match; stitch vertically
     const imgs = await loadAllImages(pages);
     const targetW = Math.max(...imgs.map(im => im.width));
     const pad = 8;
-    const totalH = imgs.reduce((s,im)=> s + Math.round(im.height * (targetW/im.width)), 0) + pad*(imgs.length-1);
+    const totalH = imgs.reduce((s, im) => s + Math.round(im.height * (targetW / im.width)), 0) + pad * (imgs.length - 1);
     const c = document.createElement('canvas'); c.width = targetW; c.height = totalH;
     const ctx = c.getContext('2d');
     let y = 0;
     for (const im of imgs){
-      const h = Math.round(im.height * (targetW/im.width));
+      const h = Math.round(im.height * (targetW / im.width));
       ctx.drawImage(im, 0, y, targetW, h);
       y += h + pad;
     }
@@ -360,9 +355,9 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   exportPDF.onclick = async () => {
     if (!pages.length) return;
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({unit:'mm', format:'a4'});
-    for (let i=0;i<pages.length;i++){
-      if (i>0) doc.addPage();
+    const doc = new jsPDF({ unit:'mm', format:'a4' });
+    for (let i = 0; i < pages.length; i++){
+      if (i > 0) doc.addPage();
       const dataURL = await blobToDataURL(pages[i].blob);
       await addImageFitA4(doc, dataURL);
     }
@@ -370,35 +365,34 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   };
 
   function loadAllImages(items){
-    // Prefer createImageBitmap for speed on iPad; fallback to <img>
     if ('createImageBitmap' in window){
       return Promise.all(items.map(p => createImageBitmap(p.blob)));
     }
-    return Promise.all(items.map(p => new Promise(res=>{
-      const im = new Image(); im.onload = () => res(im);
-      im.src = p.url;
+    return Promise.all(items.map(p => new Promise(res => {
+      const im = new Image(); im.onload = () => res(im); im.src = p.url;
     })));
   }
   async function addImageFitA4(doc, dataUrl){
-    const im = await new Promise(r => { const i=new Image(); i.onload=()=>r(i); i.src=dataUrl; });
-    const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight();
-    let w = pageW, h = (im.height*w)/im.width;
-    if (h>pageH){ h = pageH; w = (im.width*h)/im.height; }
-    const x = (pageW-w)/2, y=(pageH-h)/2;
+    const im = await new Promise(r => { const i=new Image(); i.onload = () => r(i); i.src = dataUrl; });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let w = pageW, h = (im.height * w) / im.width;
+    if (h > pageH) { h = pageH; w = (im.width * h) / im.height; }
+    const x = (pageW - w)/2, y = (pageH - h)/2;
     doc.addImage(dataUrl, 'JPEG', x, y, w, h);
   }
   function downloadBlob(blob, filename){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  // Clean up camera if tab hidden
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stopCamera(); });
+  // Stop camera when tab not visible (saves battery)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopCamera();
+  });
 
-  // Init
+  // Init UI
   uiCamera(false); uiExports();
-})();
-</script>
-</body>
-</html>
+})();   
