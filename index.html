@@ -26,11 +26,18 @@ hr{border:none;border-top:1px solid var(--line);margin:12px 0}
 
 #camWrap{position:relative}
 video{width:100%;border-radius:12px;background:#000;display:block}
+/* Tap-anywhere capture overlay — must be transparent on iPad Safari */
 #tapToShoot{
-  position:absolute;inset:0;border-radius:12px;border:2px dashed transparent; /* visual hint on first run */
+  position:absolute; inset:0; border-radius:12px;
+  background: transparent !important;   /* ← kill white fill */
+  color: transparent;                    /* no text flash */
+  border: 0;                             /* reset default iOS button border */
+  outline: none;
+  -webkit-appearance: none; appearance: none;  /* remove native UIButton look */
+  padding: 0;
 }
-#tapToShoot.hint{border-color:rgba(255,255,255,.25)}
-
+/* only show a subtle dashed frame when we want to hint “tap to capture” */
+#tapToShoot.hint{ border:2px dashed rgba(255,255,255,.25); }
 #stage{position:relative;display:none;margin-top:8px}
 #stage.ready{display:block}
 #stage img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none;border-radius:12px}
@@ -58,7 +65,7 @@ video{width:100%;border-radius:12px;background:#000;display:block}
   <h1>Scan & Merge</h1>
   <div class="row">
     <button id="startBtn" class="btn primary">Start camera</button>
-    <button id="captureBtn" class="btn" disabled>Capture</button>
+    <div id="tapToShoot" role="button" aria-label="Tap to capture" tabindex="0"></div>
     <button id="switchBtn" class="btn" disabled>Switch camera</button>
     <button id="clearBtn" class="btn bad" disabled>Clear all</button>
   </div>
