@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
-<title>Scan & Merge — Fullscreen</title>
+<title>Scan & Merge — v2 (Auto Detect + OCR)</title>
 <style>
 :root{--bg:#0f1220;--ink:#eef1ff;--muted:#9aa3c7;--line:#2a3052;--accent:#6ca8ff;--ok:#7bd88f;--bad:#ff7575}
 *{box-sizing:border-box} html,body{height:100%}
@@ -17,14 +17,15 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
   position:absolute; inset:0; background:transparent !important; color:transparent;
   border:0; outline:none; -webkit-appearance:none; appearance:none; padding:0; cursor:pointer;
 }
+/* live guide overlay */
+#guide{position:absolute; inset:0; pointer-events:none}
 
 /* ===== Overlay UI (glass) ===== */
 .ui{position:fixed; left:0; right:0; z-index:3; pointer-events:none}
 .btn{
   appearance:none; border:1px solid rgba(255,255,255,.18);
   background:rgba(15,18,32,.35); color:var(--ink);
-  padding:12px 16px;           /* bigger tap target */
-  border-radius:12px; font-weight:600; cursor:pointer; backdrop-filter:saturate(180%) blur(8px);
+  padding:12px 16px; border-radius:12px; font-weight:600; cursor:pointer; backdrop-filter:saturate(180%) blur(8px);
   pointer-events:auto; font-size:15px;
 }
 .btn:disabled{opacity:.5; cursor:not-allowed}
@@ -32,16 +33,17 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
 .ok{background:rgba(123,216,143,.45); border-color:transparent; color:#06210f}
 .bad{background:rgba(255,117,117,.45); border-color:transparent; color:#2a0808}
 .ghost{background:rgba(15,18,32,.2)}
+.toggle.on{outline:2px solid rgba(125,211,252,.9)}
 
 /* top bar */
 .topbar{top:0; display:flex; align-items:center; justify-content:space-between;
   padding:calc(env(safe-area-inset-top,0) + 8px) 12px 8px}
 .row{display:flex; gap:8px; flex-wrap:wrap}
-.row.gap-lg{gap:16px}          /* wider spacing */
+.row.gap-lg{gap:16px}
 
 /* right-side vertical tools (capture button etc.) */
 .rightbar{position:fixed; right:12px; top:50%; transform:translateY(-50%); display:flex; gap:12px; flex-direction:column; z-index:3; pointer-events:none}
-.round{width:72px; height:72px; border-radius:999px; display:inline-grid; place-items:center; font-weight:700} /* bigger capture */
+.round{width:72px; height:72px; border-radius:999px; display:inline-grid; place-items:center; font-weight:700}
 .rightbar .btn{pointer-events:auto}
 
 /* bottom drawer for thumbnails */
@@ -52,7 +54,7 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
 .thumb img{width:110px; height:82px; object-fit:cover; border-radius:10px; border:1px solid rgba(255,255,255,.18); background:#000}
 .thumb button{position:absolute; top:6px; right:6px}
 
-/* Crop stage overlays fullscreen too */
+/* Crop stage */
 #stage{position:fixed; inset:0; display:none; z-index:2}
 #stage.ready{display:block}
 #stage img{position:absolute; inset:0; margin:auto; max-width:min(100%, 100%); max-height:min(100%, 100%); border-radius:12px; display:block; user-select:none; -webkit-user-drag:none}
@@ -73,6 +75,7 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
 <!-- Fullscreen camera -->
 <div id="camWrap">
   <video id="video" playsinline muted></video>
+  <canvas id="guide"></canvas>
   <div id="tapToShoot" aria-label="Tap to capture"></div>
 </div>
 
@@ -81,12 +84,20 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
   <div class="row">
     <button id="startBtn" class="btn primary">Start</button>
     <button id="switchBtn" class="btn ghost" disabled>Switch</button>
+
+    <button id="autoBtn" class="btn ghost toggle on" title="Auto detect & dewarp">Auto</button>
+    <button id="enhanceBtn" class="btn ghost toggle" title="B/W enhance">Enhance</button>
+
+    <button id="importBtn" class="btn ghost">Import</button>
+    <input id="filePicker" type="file" accept="image/*" multiple style="display:none">
     <button id="clearBtn" class="btn bad" disabled>Clear</button>
   </div>
+
   <!-- Exports are in their own group so we can hide them while cropping -->
   <div id="exportsBar" class="row gap-lg">
     <button id="exportJPG" class="btn ghost" disabled>Export JPG</button>
     <button id="exportPDF" class="btn ghost" disabled>Export PDF</button>
+    <button id="ocrAll" class="btn ghost" disabled>OCR (TXT)</button>
   </div>
 </div>
 
@@ -121,17 +132,32 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
   </div>
 </div>
 
+<!-- libs: jsPDF, OpenCV.js, Tesseract.js -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
 <script>
 (() => {
   const video = document.getElementById('video');
+  const guide = document.getElementById('guide');
+  const gctx = guide.getContext('2d');
+
   const tapToShoot = document.getElementById('tapToShoot');
   const startBtn = document.getElementById('startBtn');
   const switchBtn = document.getElementById('switchBtn');
+
+  const autoBtn = document.getElementById('autoBtn');
+  const enhanceBtn = document.getElementById('enhanceBtn');
+
+  const importBtn = document.getElementById('importBtn');
+  const filePicker = document.getElementById('filePicker');
+
   const captureBtn = document.getElementById('captureBtn');
   const clearBtn = document.getElementById('clearBtn');
   const exportJPG = document.getElementById('exportJPG');
   const exportPDF = document.getElementById('exportPDF');
+  const ocrAllBtn = document.getElementById('ocrAll');
   const exportsBar = document.getElementById('exportsBar');
 
   const stage = document.getElementById('stage');
@@ -145,17 +171,51 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
 
   let stream = null;
   let usingRear = true;
-  let pages = []; // {blob,url,w,h}
+  let pages = []; // {blob,url,w,h,text?}
+
+  let importQueue = [];
+  let cropSource = 'camera'; // 'camera' | 'import'
+  let autoEnabled = true;
+  let enhanceEnabled = false;
+
+  // flags for libs
+  let cvReady = false;
+  let ocrReady = false;
+
+  // OpenCV init
+  const waitForCV = new Promise((res) => {
+    const tick = () => {
+      if (window.cv && cv.Mat) { cvReady = true; res(); }
+      else setTimeout(tick, 80);
+    };
+    // When opencv.js finishes loading it sets onRuntimeInitialized
+    if (window.cv) {
+      cv['onRuntimeInitialized'] = () => { cvReady = true; res(); };
+    }
+    tick();
+  });
+
+  // OCR worker (lazy)
+  let ocrWorker = null;
+  async function ensureOCR() {
+    if (ocrWorker) return;
+    const { createWorker } = Tesseract;
+    ocrWorker = await createWorker('eng'); // downloads eng traineddata
+    ocrReady = true;
+  }
 
   function uiCamera(on){
     switchBtn.disabled = !on;
     tapToShoot.classList.toggle('hint', on);
+    resizeGuide();
+    if (on && autoEnabled) startGuideLoop(); else stopGuideLoop();
   }
   function uiExports(){
     const on = pages.length > 0;
     exportJPG.disabled = !on;
     exportPDF.disabled = !on;
     clearBtn.disabled = !on;
+    ocrAllBtn.disabled = !on;
     noPages.style.display = on ? 'none' : 'inline';
   }
 
@@ -180,10 +240,12 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
     stream = null; uiCamera(false);
   }
 
-  function drawFrameToCanvas(){
+  function drawFrameToCanvas(scaleW=0){
     const vw = video.videoWidth || 1920, vh = video.videoHeight || 1080;
-    const c = document.createElement('canvas'); c.width = vw; c.height = vh;
-    c.getContext('2d').drawImage(video, 0, 0, vw, vh); return c;
+    const c = document.createElement('canvas');
+    if (scaleW && vw) { c.width = scaleW; c.height = Math.round(scaleW * vh / vw); }
+    else { c.width = vw; c.height = vh; }
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height); return c;
   }
   function canvasToBlob(canvas, type='image/jpeg', q=.95){
     return new Promise(res=>{
@@ -216,21 +278,23 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
     cropBox.style.left = rect.x+'px'; cropBox.style.top = rect.y+'px';
     cropBox.style.width = rect.w+'px'; cropBox.style.height = rect.h+'px';
   }
-  function showCropFromBlob(blob){
+  function showCropFromBlob(blob, source='camera'){
+    cropSource = source;
+    retakeBtn.textContent = (source === 'camera') ? 'Retake' : 'Cancel';
     const url = URL.createObjectURL(blob);
     imgEl.onload = async ()=>{
       stage.style.display='block'; await measureStage();
-      rect.w = Math.round(stageBox.width*0.8); rect.h = Math.round(stageBox.height*0.8);
+      rect.w = Math.round(stageBox.width*0.9); rect.h = Math.round(stageBox.height*0.9);
       rect.x = Math.round((stageBox.width-rect.w)/2); rect.y = Math.round((stageBox.height-rect.h)/2);
       paintCrop(); stage.classList.add('ready');
-      if (exportsBar) exportsBar.style.display = 'none';   // hide exports while cropping
+      if (exportsBar) exportsBar.style.display = 'none';
     };
     imgEl.src = url;
     imgEl.addEventListener('load', ()=>URL.revokeObjectURL(url), {once:true});
   }
   function hideCrop(){
     stage.classList.remove('ready'); stage.style.display='none';
-    if (exportsBar) exportsBar.style.display = 'flex';      // show exports again
+    if (exportsBar) exportsBar.style.display = 'flex';
   }
   function cssRectToImageRect(){
     const sx = imgEl.naturalWidth / stageBox.width;
@@ -272,23 +336,59 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
   startBtn.onclick = () => startCamera(true);
   switchBtn.onclick = () => startCamera(!usingRear);
 
+  autoBtn.onclick = ()=>{
+    autoEnabled = !autoEnabled;
+    autoBtn.classList.toggle('on', autoEnabled);
+    if (stream) { if (autoEnabled) startGuideLoop(); else stopGuideLoop(true); }
+  };
+  enhanceBtn.onclick = ()=>{
+    enhanceEnabled = !enhanceEnabled;
+    enhanceBtn.classList.toggle('on', enhanceEnabled);
+  };
+
   const doCapture = async ()=>{
     if (!stream || stage.classList.contains('ready')) return;
     const canvas = drawFrameToCanvas();
-    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
-    showCropFromBlob(blob);
+    let blob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
+    blob = await pipelineAuto(blob); // auto detect + warp + enhance if enabled
+    showCropFromBlob(blob, 'camera');
   };
   tapToShoot.onclick = doCapture;
   captureBtn.onclick = doCapture;
 
-  retakeBtn.onclick = () => hideCrop();
+  // Import flow
+  importBtn.onclick = () => { if (!stage.classList.contains('ready')) filePicker.click(); };
+  filePicker.onchange = (e)=>{
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    importQueue.push(...files);
+    if (!stage.classList.contains('ready')) processNextImport();
+    filePicker.value = '';
+  };
+
+  async function processNextImport(){
+    if (!importQueue.length) return;
+    const next = importQueue.shift();
+    let blob = next instanceof Blob ? next : new Blob([next], {type: next.type || 'image/jpeg'});
+    blob = await pipelineAuto(blob);
+    showCropFromBlob(blob, 'import');
+  }
+
+  // Crop actions
+  retakeBtn.onclick = () => {
+    hideCrop();
+    if (cropSource === 'import') processNextImport();
+  };
+
   useCropBtn.onclick = async ()=>{
     const {sx,sy,sw,sh} = cssRectToImageRect();
     const c=document.createElement('canvas'); c.width=sw; c.height=sh;
     c.getContext('2d').drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
     const blob = await canvasToBlob(c, 'image/jpeg', .95);
     const url = URL.createObjectURL(blob);
-    pages.push({blob,url,w:sw,h:sh}); hideCrop(); renderGallery();
+    pages.push({blob,url,w:sw,h:sh});
+    hideCrop(); renderGallery();
+    if (cropSource === 'import' && importQueue.length) processNextImport();
   };
 
   clearBtn.onclick = ()=>{
@@ -296,11 +396,14 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
     if(confirm('Remove all pages?')){ pages.forEach(p=>URL.revokeObjectURL(p.url)); pages=[]; renderGallery(); }
   };
 
-  // ==== Export ====
+  // ==== Export (image-only) ====
   exportJPG.onclick = async ()=>{
     if(!pages.length) return;
-    const imgs = await ( 'createImageBitmap' in window ? Promise.all(pages.map(p=>createImageBitmap(p.blob)))
-                                                      : Promise.all(pages.map(p=>new Promise(r=>{const i=new Image(); i.onload=()=>r(i); i.src=p.url;}))) );
+    const useBitmap = 'createImageBitmap' in window;
+    const imgs = await ( useBitmap
+      ? Promise.all(pages.map(p=>createImageBitmap(p.blob, {imageOrientation:'from-image'}).catch(()=>createImageBitmap(p.blob))))
+      : Promise.all(pages.map(p=>new Promise(r=>{const i=new Image(); i.onload=()=>r(i); i.src=p.url;}))) );
+
     const targetW = Math.max(...imgs.map(im=>im.width)), pad=8;
     const totalH = imgs.reduce((s,im)=>s+Math.round(im.height*(targetW/im.width)),0) + pad*(imgs.length-1);
     const c=document.createElement('canvas'); c.width=targetW; c.height=totalH;
@@ -320,6 +423,28 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
     doc.save('scan.pdf');
   };
 
+  // ==== OCR (TXT) ====
+  ocrAllBtn.onclick = async ()=>{
+    if (!pages.length) return;
+    ocrAllBtn.disabled = true; ocrAllBtn.textContent = 'OCR…';
+    try{
+      await ensureOCR();
+      let all = '';
+      for (let i=0;i<pages.length;i++){
+        const { data } = await ocrWorker.recognize(pages[i].blob);
+        const text = (data && data.text) ? data.text.trim() : '';
+        pages[i].text = text;
+        all += `\n\n===== Page ${i+1} =====\n` + text;
+      }
+      const txtBlob = new Blob([all.trim()], {type:'text/plain'});
+      downloadBlob(txtBlob, 'scan-ocr.txt');
+    } catch(e){
+      alert('OCR failed: '+ e.message);
+    } finally {
+      ocrAllBtn.textContent = 'OCR (TXT)'; ocrAllBtn.disabled = false;
+    }
+  };
+
   async function addImageFitA4(doc, dataUrl){
     const im = await new Promise(r=>{ const i=new Image(); i.onload=()=>r(i); i.src=dataUrl; });
     const pageW=doc.internal.pageSize.getWidth(), pageH=doc.internal.pageSize.getHeight();
@@ -331,8 +456,207 @@ body{margin:0;background:#000;color:var(--ink);font-family:system-ui,-apple-syst
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
 
+  // ====== Auto Detect + Dewarp Pipeline (OpenCV.js) ======
+  async function pipelineAuto(inBlob){
+    if (!autoEnabled){ return inBlob; }
+    try{
+      await waitForCV;
+      const bitmap = await createImageBitmap(inBlob, {imageOrientation:'from-image'});
+      // draw to small canvas for detection
+      const maxW = 1600;
+      const sC = document.createElement('canvas');
+      const scale = bitmap.width > maxW ? maxW / bitmap.width : 1;
+      sC.width = Math.round(bitmap.width * scale);
+      sC.height = Math.round(bitmap.height * scale);
+      const sCx = sC.getContext('2d');
+      sCx.drawImage(bitmap, 0, 0, sC.width, sC.height);
+      const imgData = sCx.getImageData(0,0,sC.width,sC.height);
+
+      let src = cv.matFromImageData(imgData);            // RGBA
+      let gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+      let blur = new cv.Mat();
+      cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
+
+      let edges = new cv.Mat();
+      cv.Canny(blur, edges, 60, 160);
+      // thicken edges a bit
+      let kernel = cv.Mat.ones(3,3, cv.CV_8U);
+      cv.dilate(edges, edges, kernel);
+
+      // find largest 4-point contour
+      let contours = new cv.MatVector();
+      let hierarchy = new cv.Mat();
+      cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      let best = null, bestArea = 0;
+      for (let i=0; i<contours.size(); i++){
+        const cnt = contours.get(i);
+        const peri = cv.arcLength(cnt, true);
+        const approx = new cv.Mat();
+        cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+        if (approx.rows === 4){
+          const area = cv.contourArea(approx);
+          if (area > bestArea){
+            bestArea = area;
+            best = approx; // keep this approx (Mat)
+          } else approx.delete();
+        } else approx.delete();
+        cnt.delete();
+      }
+
+      let warpedBlob = inBlob; // fallback
+      if (best && bestArea > 5000){
+        // order points: tl,tr,br,bl
+        const pts = [];
+        for (let r=0;r<4;r++){
+          const p = { x: best.data32S[r*2], y: best.data32S[r*2+1] };
+          pts.push(p);
+        }
+        const ordered = orderCorners(pts);
+
+        // map to A4-ish rectangle based on width
+        const w = Math.hypot(ordered.tr.x - ordered.tl.x, ordered.tr.y - ordered.tl.y);
+        const h = Math.hypot(ordered.bl.x - ordered.tl.x, ordered.bl.y - ordered.tl.y);
+        const targetW = Math.max(1000, Math.round(Math.max(w,h))); // keep good detail
+        const targetH = Math.round(targetW * 1.4142); // A4 ratio
+
+        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+          ordered.tl.x, ordered.tl.y,
+          ordered.tr.x, ordered.tr.y,
+          ordered.br.x, ordered.br.y,
+          ordered.bl.x, ordered.bl.y
+        ]);
+        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+          0, 0,
+          targetW-1, 0,
+          targetW-1, targetH-1,
+          0, targetH-1
+        ]);
+
+        const M = cv.getPerspectiveTransform(srcTri, dstTri);
+        let warped = new cv.Mat();
+        cv.warpPerspective(gray, warped, M, new cv.Size(targetW, targetH), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+
+        // optional enhance: adaptive threshold (B/W)
+        let outMat = new cv.Mat();
+        if (enhanceEnabled){
+          cv.adaptiveThreshold(warped, outMat, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 10);
+        } else {
+          outMat = warped.clone();
+        }
+
+        // encode to JPEG
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = outMat.cols; outCanvas.height = outMat.rows;
+        const octx = outCanvas.getContext('2d');
+        // putImageData needs RGBA
+        const rgba = new cv.Mat();
+        cv.cvtColor(outMat, rgba, cv.COLOR_GRAY2RGBA);
+        const imgDataOut = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
+        octx.putImageData(imgDataOut, 0, 0);
+        warpedBlob = await canvasToBlob(outCanvas, 'image/jpeg', .95);
+
+        // cleanup
+        rgba.delete(); outMat.delete(); warped.delete(); M.delete(); srcTri.delete(); dstTri.delete();
+      }
+
+      // cleanup base mats
+      kernel.delete(); edges.delete(); contours.delete(); hierarchy.delete(); blur.delete(); gray.delete(); src.delete();
+      if (best) best.delete();
+
+      return warpedBlob;
+    } catch(e){
+      console.warn('Auto pipeline error', e);
+      return inBlob;
+    }
+  }
+
+  function orderCorners(pts){
+    // sum & diff trick
+    const sum = pts.map(p=>p.x+p.y);
+    const diff = pts.map(p=>p.x-p.y);
+    const tl = pts[sum.indexOf(Math.min(...sum))];
+    const br = pts[sum.indexOf(Math.max(...sum))];
+    const tr = pts[diff.indexOf(Math.max(...diff))];
+    const bl = pts[diff.indexOf(Math.min(...diff))];
+    return {tl,tr,br,bl};
+  }
+
+  // ====== Live Guide Loop (edge + quad) ======
+  let guideRAF = null, guideTmpCanvas = document.createElement('canvas');
+  function resizeGuide(){
+    const r = document.getElementById('camWrap').getBoundingClientRect();
+    guide.width = r.width; guide.height = r.height;
+  }
+  function startGuideLoop(){
+    if (!cvReady) return;
+    if (guideRAF) cancelAnimationFrame(guideRAF);
+    const draw = ()=>{
+      if (!stream || !autoEnabled){ guideRAF = null; gctx.clearRect(0,0,guide.width,guide.height); return; }
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh){ guideRAF = requestAnimationFrame(draw); return; }
+
+      // sample smaller
+      const sW = 480, sH = Math.round(sW * vh / vw);
+      guideTmpCanvas.width = sW; guideTmpCanvas.height = sH;
+      guideTmpCanvas.getContext('2d').drawImage(video, 0, 0, sW, sH);
+      const id = guideTmpCanvas.getContext('2d').getImageData(0,0,sW,sH);
+      try{
+        let src = cv.matFromImageData(id);
+        let gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        let blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
+        let edges = new cv.Mat(); cv.Canny(blur, edges, 60, 160);
+        let kernel = cv.Mat.ones(3,3, cv.CV_8U); cv.dilate(edges, edges, kernel);
+        let contours = new cv.MatVector(); let hierarchy = new cv.Mat();
+        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        let best=null, area=0;
+        for(let i=0;i<contours.size();i++){
+          const cnt=contours.get(i); const peri=cv.arcLength(cnt,true);
+          const approx=new cv.Mat(); cv.approxPolyDP(cnt,approx,0.02*peri,true);
+          if (approx.rows===4){
+            const a=cv.contourArea(approx);
+            if(a>area){ if(best) best.delete(); best=approx; area=a; } else approx.delete();
+          } else approx.delete();
+          cnt.delete();
+        }
+
+        gctx.clearRect(0,0,guide.width,guide.height);
+        if (best && area>1500){
+          const pts=[]; for(let r=0;r<4;r++){ pts.push({x:best.data32S[r*2], y:best.data32S[r*2+1]}); }
+          const ord = orderCorners(pts);
+          // scale from sample to canvas size
+          const scaleX = guide.width / sW, scaleY = guide.height / sH;
+          gctx.lineWidth = 3;
+          gctx.strokeStyle = 'rgba(123,216,143,0.9)';
+          gctx.beginPath();
+          gctx.moveTo(ord.tl.x*scaleX, ord.tl.y*scaleY);
+          gctx.lineTo(ord.tr.x*scaleX, ord.tr.y*scaleY);
+          gctx.lineTo(ord.br.x*scaleX, ord.br.y*scaleY);
+          gctx.lineTo(ord.bl.x*scaleX, ord.bl.y*scaleY);
+          gctx.closePath(); gctx.stroke();
+        }
+
+        // clean
+        if (best) best.delete();
+        kernel.delete(); contours.delete(); hierarchy.delete(); edges.delete(); blur.delete(); gray.delete(); src.delete();
+      }catch(e){
+        // ignore per-frame errors
+      }
+      guideRAF = requestAnimationFrame(draw);
+    };
+    draw();
+  }
+  function stopGuideLoop(clear=false){
+    if (guideRAF) cancelAnimationFrame(guideRAF);
+    guideRAF = null;
+    if (clear) gctx.clearRect(0,0,guide.width,guide.height);
+  }
+
   // Save battery when hidden
-  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) stopCamera(); });
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) { stopCamera(); stopGuideLoop(true); } });
 
   // init
   uiCamera(false); uiExports();
